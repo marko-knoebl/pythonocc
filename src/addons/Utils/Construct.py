@@ -49,9 +49,10 @@ from OCC.Geom import *
 # high level
 from OCC.Utils.Common import *
 from OCC.Utils.Context import assert_isdone
-from OCC.KBE.types_lut import GeometryLookup, ShapeToTopology
+from OCC.KBE.types_lut import shape_lut, curve_lut, surface_lut, topo_lut
 
 from functools import wraps
+import warnings, operator
 
 EPSILON = TOLERANCE = 1e-6
 ST = ShapeToTopology()
@@ -89,6 +90,12 @@ def gp_Pnt_set_state(self, state):
     '''
     self.__init__(*state)
 
+def gp_equal(self, other):
+    '''
+    overriding the __eq__ / == operator
+    '''
+    return self.IsEqual(other, TOLERANCE)
+
 def gp_pnt_print(self):
     return '< gp_Pnt: {0}, {1}, {2} >'.format(*self.Coord())
 
@@ -96,6 +103,25 @@ def gp_vec_print(self):
     x,y,z = self.Coord()
     magn = self.Magnitude()
     return '< gp_Vec: {0}, {1}, {2}, magnitude: {3} >'.format(x,y,z, magn)
+
+def _apply(pnt, other, _operator):
+    if isinstance(other, gp_Pnt):
+        return gp_Pnt(*map(lambda x: _operator(*x), zip(pnt.Coord(), other.Coord())))
+    else:
+        return gp_Pnt(*map(lambda x: _operator(x, other), pnt.Coord()))
+
+def gp_pnt_add(self, other):
+    return _apply(self, other, operator.add)
+
+def gp_pnt_sub(self, other):
+    return _apply(self, other, operator.sub)
+
+def gp_pnt_mul(self, other):
+    return _apply(self, other, operator.mul)
+
+def gp_pnt_div(self, other):
+    return _apply(self, other, operator.div)
+
 
 # easier conversion between data types
 gp_Vec.as_pnt  = vector_to_point
@@ -113,6 +139,11 @@ gp_Vec.__repr__ = gp_vec_print
 gp_Vec.__str__ = gp_vec_print
 gp_Pnt.__repr__ = gp_pnt_print
 gp_Pnt.__str__ = gp_pnt_print
+gp_Pnt.__eq__ = gp_equal
+gp_Pnt.__add__ = gp_pnt_add
+gp_Pnt.__sub__ = gp_pnt_sub
+gp_Pnt.__mul__ = gp_pnt_mul
+gp_Pnt.__div__ = gp_pnt_div
 
 #===============================================================================
 # ---TOPOLOGY---
@@ -349,8 +380,33 @@ def make_plane(center=gp_Pnt(0,0,0),
     return face
 
 
+def make_oriented_box(v_corner, v_x, v_y, v_z):
+    """
+    produces an oriented box
+    oriented meaning here that the x,y,z axis do not have to be cartesian aligned
+
+    :param v_corner: the lower corner
+    :param v_x: gp_Vec that describes the X-axis
+    :param v_y: gp_Vec that describes the Y-axis
+    :param v_z: gp_Vec that describes the Z-axis
+    :return: TopoDS_Solid
+    """
+    verts = map(lambda x: x.as_pnt(), [v_corner, v_corner+v_x, v_corner+v_x+v_y, v_corner+v_y])
+    p = make_polygon(verts, closed=True)
+    li = make_line(v_corner.as_pnt(), (v_corner+v_z).as_pnt())
+    ooo = BRepOffsetAPI_MakePipe(p,li)
+    ooo.Build()
+    shp = ooo.Shape()
+
+    bottom = make_face(p)
+    top = translate_topods_from_vector(bottom, v_z, True)
+
+    oriented_bbox = make_solid(sew_shapes([bottom, shp, top]))
+    return oriented_bbox
+
+
 @wraps(BRepPrimAPI_MakeBox)
-def make_cube(*args):
+def make_box(*args):
     box = BRepPrimAPI_MakeBox(*args)
     box.Build()
     with assert_isdone(box, 'failed to built a cube...'):
@@ -489,8 +545,7 @@ def sew_shapes( shapes, tolerance=0.001 ):
     print 'n deleted faces:',sew.NbDeletedFaces()
     print 'n free edges',sew.NbFreeEdges()
     print 'n multiple edges:',sew.NbMultipleEdges()
-    
-    result = sew.SewedShape()
+    result = ShapeToTopology()(sew.SewedShape())
 #     ???
 #    sew.Delete()
     return result
@@ -543,6 +598,24 @@ def boolean_fuse_old(shapeToCutFrom, joiningShape):
     shape = join.Shape()
     join.Delete()
     return shape
+
+def splitter(shape, profile):
+    '''split a *shape* using a *profile*
+    :returns the splitted shape
+    '''
+    try:
+        from OCC.GEOMAlgo import GEOMAlgo_Splitter
+    except ImportError:
+        msg = "GEOM wrapper is necesary to access advanced constructs"
+        warnings.warn(msg)
+        return None
+    splitter = GEOMAlgo_Splitter()
+    splitter.AddShape(shape)
+    splitter.AddTool(profile)
+    splitter.Perform()
+    splitter_shape = splitter.Shape()
+    return splitter_shape
+
 
 def trim_wire(wire, shapeLimit1, shapeLimit2, periodic=False):
     '''return the trimmed wire that lies between `shapeLimit1` and `shapeLimit2`

@@ -12,16 +12,16 @@ from __future__ import with_statement
 ##of python bindings for OpenCasacde library.
 ##
 ##This software is governed by the CeCILL license under French law and
-##abiding by the rules of distribution of free software.  You can  use, 
+##abiding by the rules of distribution of free software.  You can  use,
 ##modify and/ or redistribute the software under the terms of the CeCILL
 ##license as circulated by CEA, CNRS and INRIA at the following URL
-##"http://www.cecill.info". 
+##"http://www.cecill.info".
 ##
 ##As a counterpart to the access to the source code and  rights to copy,
 ##modify and redistribute granted by the license, users are provided only
 ##with a limited warranty  and the software's author,  the holder of the
 ##economic rights,  and the successive licensors  have only  limited
-##liability. 
+##liability.
 ##
 ##In this respect, the user's attention is drawn to the risks associated
 ##with loading,  using,  modifying and/or developing or reproducing the
@@ -30,9 +30,9 @@ from __future__ import with_statement
 ##therefore means  that it is reserved for developers  and  experienced
 ##professionals having in-depth computer knowledge. Users are therefore
 ##encouraged to load and test the software's suitability as regards their
-##requirements in conditions enabling the security of their systems and/or 
-##data to be ensured and,  more generally, to use and operate it in the 
-##same conditions as regards security. 
+##requirements in conditions enabling the security of their systems and/or
+##data to be ensured and,  more generally, to use and operate it in the
+##same conditions as regards security.
 ##
 ##The fact that you are presently reading this means that you have had
 ##knowledge of the CeCILL license and that you accept its terms.
@@ -56,6 +56,21 @@ from OCC.Quantity import *
 from OCC.GProp import GProp_GProps
 from OCC.GeomAbs import *
 
+from OCC import Graphic3d
+import random
+
+
+#===============================================================================
+# No PythonOCC dependencies...
+#===============================================================================
+
+def roundlist(li, n_decimals=3):
+    return [round(i,n_decimals) for i in li]
+
+#===============================================================================
+# CONSTANTS
+#===============================================================================
+
 TOLERANCE = 1e-6
 
 def get_boundingbox(shape, tol=1e-12):
@@ -73,6 +88,9 @@ def get_boundingbox(shape, tol=1e-12):
 #===============================================================================
 # Data type utilities
 #===============================================================================
+
+def color(r,g,b):
+    return Quantity_Color(r,g,b, Quantity_TOC_RGB)
 
 def to_string(_string):
     from OCC.TCollection import  TCollection_ExtendedString
@@ -114,11 +132,11 @@ def boolean_cut(shapeToCutFrom, cuttingShape):
         cut = BRepAlgoAPI_Cut(shapeToCutFrom, cuttingShape)
         print 'can work?', cut.BuilderCanWork()
         _error = {
-                        0: '- Ok', 
-                        1: '- The Object is created but Nothing is Done', 
+                        0: '- Ok',
+                        1: '- The Object is created but Nothing is Done',
                         2: '- Null source shapes is not allowed',
                         3: '- Check types of the arguments',
-                        4: '- Can not allocate memory for the DSFiller', 
+                        4: '- Can not allocate memory for the DSFiller',
                         5: '- The Builder can not work with such types of arguments', 
                         6: '- Unknown operation is not allowed',
                         7: '- Can not allocate memory for the Builder',
@@ -165,6 +183,7 @@ def filter_points_by_distance( list_of_point, distance=0.1):
             tmp.append(a)
     return tmp
     
+
 def points_to_bspline(pnts):
     '''
     
@@ -267,7 +286,6 @@ def random_vec():
     return gp_Vec(x,y,z)
 
 def random_colored_material_aspect():
-    from OCC import Graphic3d
     import random
     #asp = Graphic3d.Graphic3d_MaterialAspect()
     #cc = asp.Color()
@@ -280,6 +298,8 @@ def random_colored_material_aspect():
     return Graphic3d.Graphic3d_MaterialAspect(getattr(Graphic3d, color))
     #return asp
 
+def random_color():
+    return color(random.random(),random.random(),random.random())
 
 #===============================================================================
 # --- BUILD PATCHES ---
@@ -353,9 +373,9 @@ def intersection_from_three_planes( planeA, planeB, planeC, show=False):
     @param planeC:
     @param show:
     '''
-    planeA = planeA if not isinstance(planeA, gp_Pln) else planeA.Pln()
-    planeB = planeB if not isinstance(planeB, gp_Pln) else planeB.Pln()
-    planeC = planeC if not isinstance(planeC, gp_Pln) else planeC.Pln()
+    planeA = planeA if not hasattr(planeA, 'Pln') else planeA.Pln()
+    planeB = planeB if not hasattr(planeB, 'Pln') else planeB.Pln()
+    planeC = planeC if not hasattr(planeC, 'Pln') else planeC.Pln()
     
 
     intersection_planes = IntAna_Int3Pln( planeA,
@@ -366,6 +386,24 @@ def intersection_from_three_planes( planeA, planeB, planeC, show=False):
     if show:
         display.DisplayShape(make_vertex(pnt))
     return pnt
+
+def intersect_shape_by_line(topods_shape, line):
+    """
+    finds the intersection of a shape and a line
+
+    :param shape: any TopoDS_*
+    :param line: gp_Lin
+    :return: a list with a number of tuples that corresponds to the number of intersections found
+    the tuple contains ( gp_Pnt, TopoDS_Face, u,v,w ), respectively the intersection point, the intersecting face
+    and the u,v,w parameters of the intersection point
+    :raise:
+    """
+    from OCC.IntCurvesFace import IntCurvesFace_ShapeIntersector
+    iii = IntCurvesFace_ShapeIntersector()
+    iii.Load(topods_shape, TOLERANCE)
+    iii.Perform(line, 0,1)
+    return [(iii.Pnt(i), iii.Face(i), iii.UParameter(i), iii.VParameter(i), iii.WParameter(i)) for i in range(1, iii.NbPnt()+1)]
+
 
 #def split_edge(edge, pnt):
 #    '''
@@ -514,7 +552,7 @@ def to_adaptor_3d(curveType):
         return BRepAdaptor_Curve(curveType)
     elif issubclass(curveType.__class__, Geom_Curve):
         return GeomAdaptor_Curve(curveType.GetHandle())
-    elif isinstance(curveType, Handle_Geom_Curve):
+    elif hasattr(curveType, 'GetObject'):
         _crv = curveType.GetObject()
         if issubclass(_crv.__class__, Geom_Curve):
             return GeomAdaptor_Curve(curveType)
@@ -538,3 +576,23 @@ def wire_to_curve(wire, tolerance=TOLERANCE, order=GeomAbs_C2, max_segment=200, 
     approx = Approx_Curve3d(hadap.GetHandle(), tolerance, order, max_segment, max_order)
     with assert_isdone(approx, 'not able to compute approximation from wire'):
         return approx.Curve().GetObject()
+
+
+
+
+# TODO: refactor
+
+
+def adapt_edge_to_curve(edg):
+    '''
+    returns a curve adaptor from an edge
+    @param edg: TopoDS_Edge
+    '''
+    return BRepAdaptor_Curve(edg)
+
+def adapt_edge_to_hcurve(edg):
+    c = BRepAdaptor_HCurve()
+    c.ChangeCurve().Initialize(edg)
+    return c
+
+

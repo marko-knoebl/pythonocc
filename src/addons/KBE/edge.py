@@ -1,26 +1,30 @@
-import warnings
 from OCC.BRep import BRep_Tool
-from OCC.BRepAdaptor import BRepAdaptor_Curve
-from OCC.GCPnts import GCPnts_AbscissaPoint, GCPnts_UniformAbscissa
-from OCC.Geom import Geom_OffsetCurve, Geom_Curve, Geom_TrimmedCurve
+from OCC.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_HCurve
+from OCC.GCPnts import  GCPnts_UniformAbscissa
+from OCC.Geom import Geom_OffsetCurve, Geom_TrimmedCurve
 from OCC.KBE.base import KbeObject
 from OCC.TopExp import TopExp
-from OCC.TopoDS import TopoDS_Wire, TopoDS_Edge, TopoDS_Face, TopoDS_Vertex
-from OCC.GeomLib import GeomLib
+from OCC.TopoDS import  TopoDS_Edge, TopoDS_Vertex
 from OCC.gp import *
 # high-level
-from OCC.Utils.Common import vertex2pnt, minimum_distance, to_adaptor_3d
-from OCC.Utils.Construct import make_edge, trim_wire, fix_continuity
+from OCC.Utils.Common import vertex2pnt, minimum_distance
+from OCC.Utils.Construct import make_edge, fix_continuity
 from OCC.Utils.Context import assert_isdone
 from OCC.KBE.vertex import Vertex
-
+from OCC.GeomLProp import GeomLProp_CurveTool
+from OCC.BRepLProp import BRepLProp_CLProps
+from OCC.GeomLib import GeomLib
+from OCC.GCPnts import GCPnts_AbscissaPoint
+from OCC.GeomAPI import GeomAPI_ProjectPointOnCurve
+from OCC.ShapeAnalysis import ShapeAnalysis_Edge
+from OCC.BRep import *
 
 class IntersectCurve(object):
     def __init__(self, Instance):
         self.Instance = Instance
 
     def intersect(self, other):
-        '''intersect self with a point, curve, edge, face, solid
+        '''Intersect self with a point, curve, edge, face, solid
         method wraps dealing with the various topologies
         '''
         raise NotImplementedError
@@ -29,9 +33,11 @@ class IntersectCurve(object):
 class DiffGeomCurve(object):
     def __init__(self, instance):
         self.instance = instance
-        from OCC.BRepLProp import BRepLProp_CLProps
         # initialize with random parameter: 0
-        self._curvature = BRepLProp_CLProps(self.instance.adaptor, 0, 2, self.instance.tolerance)
+
+    @property
+    def _curvature(self):
+        return BRepLProp_CLProps(self.instance.adaptor, 0, 2, self.instance.tolerance)
 
     def curvature(self, u, n, resolution=1e-7):
         self._curvature.SetParameter(u)
@@ -46,7 +52,7 @@ class DiffGeomCurve(object):
         return pnt
 
     def curvature(self, u):
-        # TODO: find a better way to achieve this method
+        # UGLYYYYYYYYYYYY
         self._curvature.SetParameter(u)
         return self._curvature.Curvature()
 
@@ -56,8 +62,8 @@ class DiffGeomCurve(object):
         '''
         self._curvature.SetParameter(u)
         if self._curvature.IsTangentDefined():
-            direction = gp_Dir()
-            self._curvature.Tangent(direction)
+            ddd = gp_Dir()
+            self._curvature.Tangent(ddd)
             return ddd
         else:
             raise ValueError('no tangent defined')
@@ -88,18 +94,17 @@ class DiffGeomCurve(object):
             raise AssertionError, 'n of derivative is one of [1,2,3]'
 
     def points_from_tangential_deflection(self):
-        from OCC.GCPnts import GCPnts_TangentialDeflection
         pass
 
 
 
 #===============================================================================
-#    Curve.construct
+#    Curve.Construct
 #===============================================================================
 
 class ConstructFromCurve():
     def __init__(self, instance):
-        self.Instance = instance
+        self.instance = instance
 
     def make_face(self):
         '''returns a brep face iff self.closed()
@@ -118,10 +123,9 @@ class ConstructFromCurve():
         '''
         approximation of a curve on surface
         '''
-        from OCC.Approx import Approx_CurveOnSurface
-        raise NotImplementedError
+        pass
 
-class Edge(KbeObject):
+class Edge(KbeObject, TopoDS_Edge):
     '''
     '''
 
@@ -130,35 +134,50 @@ class Edge(KbeObject):
         '''
         assert isinstance(edge, TopoDS_Edge), 'need a TopoDS_Edge, got a %s'% edge.__class__
         KbeObject.__init__(self, 'edge')
-        self._topo_type = TopoDS_Edge
-        self.topo = edge
+        TopoDS_Edge.__init__(self, edge)
 
-        # STATE; whether cooperative classes are initialized
+        # tracking state
         self._local_properties_init    = False
         self._curvature_init           = False
         self._geometry_lookup_init     = False
         self._curve_handle = None
         self._curve = None
         self._adaptor = None
+        self._adaptor_handle = None
 
         # instantiating cooperative classes
-        self.diff_geom = DiffGeomCurve(self)
-        self.intersect = IntersectCurve(self)
-        self.construct = ConstructFromCurve(self)
+        # cooperative classes are distinct through CamelCaps from normal method -> pep8
+        self.DiffGeom = DiffGeomCurve(self)
+        self.Intersect = IntersectCurve(self)
+        self.Construct = ConstructFromCurve(self)
         #self.graphic   = GraphicCurve(self)
 
         # GeomLProp object
         self._curvature = None
-        self._local_properties()
+        #self._local_properties()
 
         # some aliasing of useful methods
-        self.is_closed      = self.adaptor.IsClosed
-        self.is_periodic    = self.adaptor.IsPeriodic
-        self.is_rational    = self.adaptor.IsRational
-        self.continuity     = self.adaptor.Continuity
-        self.degree         = self.adaptor.Degree
-        self.nb_knots       = self.adaptor.NbKnots
-        self.nb_poles       = self.adaptor.NbPoles
+
+    def is_closed(self):
+        return self.adaptor.IsClosed()
+
+    def is_periodic(self):
+        return self.adaptor.IsPeriodic()
+
+    def is_rational(self):
+        return self.adaptor.IsRational()
+
+    def continuity(self):
+        return self.adaptor.Continuity
+
+    def degree(self):
+        return self.adaptor.Degree()
+
+    def nb_knots(self):
+        return self.adaptor.NbKnots()
+
+    def nb_poles(self):
+        return self.adaptor.NbPoles()
 
 
     @property
@@ -166,7 +185,7 @@ class Edge(KbeObject):
         if self._curve is not None and not self.is_dirty:
             pass
         else:
-            self._curve_handle  = BRep_Tool().Curve(self.topo)[0]
+            self._curve_handle  = BRep_Tool().Curve(self)[0]
             self._curve = self._curve_handle.GetObject()
         return self._curve
 
@@ -183,11 +202,38 @@ class Edge(KbeObject):
         if self._adaptor is not None and not self.is_dirty:
             pass
         else:
-            self._adaptor = BRepAdaptor_Curve(self.topo)
+            self._adaptor = BRepAdaptor_Curve(self)
+            self._adaptor_handle = BRepAdaptor_HCurve(self._adaptor)
         return self._adaptor
 
+    @property
+    def adaptor_handle(self):
+        if self._adaptor_handle is not None and not self.is_dirty:
+            pass
+        else:
+            self.adaptor
+        return self._adaptor_handle
+
+    @property
+    def geom_curve_handle(self):
+        """
+        :return: Handle_Geom_Curve adapted from `self`
+        """
+        if self._adaptor_handle is not None and not self.is_dirty:
+            pass
+        else:
+            self.adaptor
+        return self._adaptor.Curve().Curve()
+
+    def pcurve(self, face):
+        """
+        computes the 2d parametric spline that lies on the surface of the face
+        :return: Geom2d_Curve, u, v
+        """
+        crv, u,v =  BRep_Tool().CurveOnSurface(self, face)
+        return crv.GetObject(), u, v
+
     def _local_properties(self):
-        from OCC.GeomLProp import GeomLProp_CurveTool
         self._lprops_curve_tool = GeomLProp_CurveTool()
         self._local_properties_init = True
 
@@ -230,6 +276,10 @@ class Edge(KbeObject):
         @param lbound:
         @param ubound:
         '''
+#        if self.is_periodic:
+#            pass
+#        else:
+#            warnings.warn('the wire to be trimmed is not closed, hence cannot be made periodic')
         a,b = sorted([lbound,ubound])
         tr = Geom_TrimmedCurve(self.adaptor.Curve().Curve(), a,b).GetHandle()
         return Edge(make_edge(tr))
@@ -253,13 +303,12 @@ class Edge(KbeObject):
     def closest(self, other):
         return minimum_distance(self.brep, other)
 
-    def project_pnt_on_edge(self, pnt_or_vertex):
+    def project_vertex(self, pnt_or_vertex):
         ''' returns the closest orthogonal project on `pnt` on edge
         '''
         if isinstance(pnt_or_vertex, TopoDS_Vertex):
-            pnt = vertex2pnt(pnt_or_vertex)
+            pnt_or_vertex = vertex2pnt(pnt_or_vertex)
 
-        from OCC.GeomAPI import GeomAPI_ProjectPointOnCurve
         poc = GeomAPI_ProjectPointOnCurve(pnt_or_vertex, self.curve_handle)
         return poc.LowerDistanceParameter(), poc.NearestPoint()
 
@@ -268,15 +317,17 @@ class Edge(KbeObject):
         on the curve with a distance length from u
         raises OutOfBoundary if no such parameter exists
         '''
-        from OCC.GCPnts import GCPnts_AbscissaPoint
         ccc = GCPnts_AbscissaPoint(self.adaptor, distance, close_parameter, estimate_parameter, 1e-5)
         with assert_isdone(ccc, 'couldnt compute distance on curve'):
             return ccc.Parameter()
 
     def mid_point(self):
+        """
+        :return: the parameter at the mid point of the curve, and its corresponding gp_Pnt
+        """
         _min, _max = self.domain()
         _mid = (_min+_max) / 2.
-        return self.adaptor.Value(_mid)
+        return _mid, self.adaptor.Value(_mid),
 
     def divide_by_number_of_points(self, n_pts, lbound=None, ubound=None):
         '''returns a nested list of parameters and points on the edge
@@ -287,6 +338,7 @@ class Edge(KbeObject):
             _lbound = lbound
         elif ubound:
             _ubound = ubound
+
         npts = GCPnts_UniformAbscissa(self.adaptor, n_pts, _lbound, _ubound)
         if npts.IsDone():
             tmp = []
@@ -297,6 +349,7 @@ class Edge(KbeObject):
             return tmp
         else:
             return None
+
 
     @property
     def color(self, indx=None):
@@ -321,34 +374,58 @@ class Edge(KbeObject):
         '''descriptor setting or getting the coordinate of a control point at indx'''
         raise NotImplementedError
 
+
+#    @property
+#    def periodic(self):
+#        return self.adaptor.IsPeriodic()
+#
+#    @periodic.setter
+#    def periodic(self, _bool):
+#        _bool = bool(_bool)
+#        if self.is_closed:
+#            self.adaptor.BSpline()
+#        else:
+#            raise warnings.warn('cannot set periodicity on a non-closed edge')
+
     def control_point(self, indx, pt=None):
         '''gets or sets the coordinate of the control point
         '''
         raise NotImplementedError
 
     def __eq__(self, other):
-        return self.brep.IsEqual(other)
+        if hasattr(other, 'topo'):
+            return self.IsEqual(other)
+        else:
+            return self.IsEqual(other)
 
-    @property
-    def type(self):
-        '''returns edge, wire, curve
-        determines whether the curve is part of a topology
-        '''
-        return 'edge'
+    def __ne__(self, other):
+        return not(self.__eq__(other))
 
-    def kind(self):
-        if not self._geometry_lookup_init:
-            self._geometry_lookup = GeometryTypeLookup()
-            self._geometry_lookup_init = True
-        return self._geometry_lookup[self.curve]
+#    def __cmp__(self, other):
+#        return self.__eq__(other)
 
+#    def __contains__(self, item):
+#        print 'in list?'
+#        import ipdb; ipdb.set_trace()
+#        return 0
+#
+#
+    def __hash__(self):
+        return self.__hash__()
 
     def first_vertex(self):
         # TODO: should return Vertex, not TopoDS_Vertex
-        return TopExp.FirstVertex(self.topo)
+        return TopExp.FirstVertex(self)
 
     def last_vertex(self):
-        return TopExp.LastVertex(self.topo)
+        return TopExp.LastVertex(self)
+
+    def common_vertex(self, edge):
+        vert = TopoDS_Vertex()
+        if TopExp.CommonVertex(self, edge, vert):
+            return vert
+        else:
+            return False
 
 #===============================================================================
 #    Curve.
@@ -374,12 +451,15 @@ class Edge(KbeObject):
         splits an edge to achieve a level of continuity
         :param continuity: GeomAbs_C*
         """
-        return fix_continuity(self.topo, continuity)
+        return fix_continuity(self, continuity)
 
     def continuity_to_another_curve(self, other):
         '''returns continuity between self and another curve
         '''
         return self._lprops_curve_tool(self.curve)
+
+    def continuity_from_faces(self, f1, f2):
+        return BRep_Tool_Continuity(self, f1, f2)
 
 #===============================================================================
 #    Curve.loop
@@ -398,24 +478,37 @@ class Edge(KbeObject):
 #===============================================================================
 #    Curve.
 #===============================================================================
+    def is_trimmed(self):
+        '''checks if curve is trimmed
 
-    def is_planar(self, tolerance=None):
+        check if the underlying geom type is trimmed
+
+        '''
+        raise NotImplementedError
+
+
+    def is_line(self, tolerance=None):
         '''checks if the curve is planar within a tolerance
         '''
-        raise NotImplementedError
+        if self.nb_knots() == 2 and self.nb_poles() ==2:
+            return True
+        else:
+            return False
 
-    def on_surface(self, surface):
+    def is_seam(self, face):
+        """
+        :return: True if the edge has two pcurves on one surface
+        ( in the case of a sphere for example... )
+        """
+        return ShapeAnalysis_Edge(self, face)
+
+    def is_edge_on_face(self, face):
         '''checks whether curve lies on a surface or a face
         '''
-        raise NotImplementedError
+        return ShapeAnalysis_Edge().HasPCurve(self, face)
 
     def on_edge(self, edge):
         '''checks if the curve lies on an edge or a border
-        '''
-        raise NotImplementedError
-
-    def is_trimmed(self):
-        '''checks if curve is trimmed
         '''
         raise NotImplementedError
 
@@ -431,9 +524,9 @@ class Edge(KbeObject):
 
         http://www.opencascade.org/org/forum/thread_1125/
         '''
-        show = super(self, Edge).show()
-        if not poles and not vertices and not knots:
-            show()
+        show = super(Edge, self).show()
+        #if not poles and not vertices and not knots:
+        #    show()
 
     def update(self, context):
         '''updates the graphic presentation when called

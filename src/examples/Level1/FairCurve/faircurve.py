@@ -45,10 +45,13 @@ def batten_curve( pt1, pt2, height, slope, angle1, angle2):
     fc.SetAngle2(angle2)
     fc.SetHeight(height)
     fc.SetSlope(slope)
+    #fc.SetCurvature1(3)
+    #fc.SetCurvature1(22)
     fc.SetFreeSliding(True)
     print fc.DumpToString()
-    status = fc.Compute()
-    print (error_code(status[0]), error_code(status[1]))
+    ff = fc.Compute()
+    ff = (error_code(ff[0]), error_code(ff[1]))
+    print ff
     return fc.Curve()
 
 def faircurve(event=None):
@@ -56,7 +59,9 @@ def faircurve(event=None):
     pt2 = gp_Pnt2d(0,120)
     height = 100.
     slope = 0.3
+
     pl = Geom_Plane(gp_Pln())
+
     for i in range(0, 40, 1):
         # TODO: the parameter slope needs to be visualized
         bc = batten_curve(pt1, pt2, height, i/100., math.radians(i), math.radians(-i))
