@@ -12,7 +12,7 @@ from OCC.BRepTools import  BRepTools_TrsfModification
 
 
 def make_vertex(*args):
-    return BRepBuilderAPI_MakeVertex(*args)
+    return BRepBuilderAPI_MakeVertex(*args).Vertex()
 
 class Vertex(KbeObject, TopoDS_Vertex):
     """
