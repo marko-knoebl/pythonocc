@@ -97,8 +97,7 @@ class TestVertex_Point(unittest.TestCase):
         v1 = Vertex(1,1,1)
         v1.x = 12
         v2 = Vertex(12,1,1,)
-        import ipdb; ipdb.set_trace()
-        self.assertEqual(v1,pnt)
+        self.assertEqual(v1,v2)
         
 def suite():
    suite = unittest.TestSuite()
