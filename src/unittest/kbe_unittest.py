@@ -81,7 +81,7 @@ class TestFace_Sphere(unittest.TestCase):
         self.assertEqual(trimmed, False)
 
     def test_planar(self):
-        is_planar, pln = self.face.is_planar()
+        is_planar = self.face.is_planar()
         self.assertEqual(is_planar, False)
 
     def test_global_properties(self):
