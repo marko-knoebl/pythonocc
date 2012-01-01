@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-from OCC.TopoDS import *
 
 ##Copyright 2008-2011 Thomas Paviot (tpaviot@gmail.com)
 ##
@@ -31,8 +30,10 @@ import OCC.TopoDS
 import OCC.Visual3d
 from OCC import Prs3d
 from OCC.Quantity import Quantity_Color
+from OCC.TopoDS import *
 
 import os, os.path, types, sys, subprocess
+from ctypes import util
 
 try:
     import OCC.NIS
